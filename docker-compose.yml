@@ -1,0 +1,121 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ${COMPOSE_PROJECT_NAME}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bdml-network
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: ${COMPOSE_PROJECT_NAME}-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_HOST_PORT}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT}:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - bdml-network
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: ${COMPOSE_PROJECT_NAME}-minio-init
+    depends_on:
+      - minio
+    environment:
+      MINIO_INTERNAL_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ./docker/minio/create-buckets.sh:/create-buckets.sh:ro
+    entrypoint: ["/bin/sh", "/create-buckets.sh"]
+    networks:
+      - bdml-network
+
+  jupyterhub:
+    build:
+      context: .
+      dockerfile: docker/jupyterhub/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}-jupyterhub:local
+    container_name: ${COMPOSE_PROJECT_NAME}-jupyterhub
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      JUPYTERHUB_USER: ${JUPYTERHUB_USER}
+      JUPYTERHUB_PASSWORD: ${JUPYTERHUB_PASSWORD}
+
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      MINIO_INTERNAL_ENDPOINT: http://minio:9000
+      MINIO_EXTERNAL_ENDPOINT: http://localhost:${MINIO_API_HOST_PORT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_RAW_BUCKET: raw
+      MINIO_PROCESSED_BUCKET: processed
+      MINIO_MARTS_BUCKET: marts
+    ports:
+      - "${JUPYTERHUB_HOST_PORT}:8000"
+    volumes:
+      - ./:/home/${JUPYTERHUB_USER}/work
+      - jupyterhub_data:/srv/jupyterhub
+    networks:
+      - bdml-network
+
+  superset:
+    build:
+      context: .
+      dockerfile: docker/superset/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}-superset:local
+    container_name: ${COMPOSE_PROJECT_NAME}-superset
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL}
+    ports:
+      - "${SUPERSET_HOST_PORT}:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    networks:
+      - bdml-network
+
+volumes:
+  postgres_data:
+  minio_data:
+  jupyterhub_data:
+  superset_home:
+
+networks:
+  bdml-network:
+    driver: bridge
