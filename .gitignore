@@ -219,3 +219,8 @@ __marimo__/
 
 # VS Code
 .vscode
+
+# JupyterHub runtime files
+jupyterhub.sqlite
+jupyterhub_cookie_secret
+jupyterhub-proxy.pid

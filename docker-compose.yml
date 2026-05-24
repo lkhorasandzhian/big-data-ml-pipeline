@@ -58,6 +58,7 @@ services:
     image: ${COMPOSE_PROJECT_NAME}-jupyterhub:local
     container_name: ${COMPOSE_PROJECT_NAME}-jupyterhub
     restart: unless-stopped
+    working_dir: /home/${JUPYTERHUB_USER}/work
     depends_on:
       postgres:
         condition: service_healthy
